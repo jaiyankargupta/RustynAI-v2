@@ -72,6 +72,9 @@ const MainApp: React.FC = ({
       window.electronAPI.onSolutionStart(() => {
         setView("solutions")
       }),
+      window.electronAPI.onSolutionSuccess(() => {
+        setView("solutions")
+      }),
       window.electronAPI.onUnauthorized(() => {
         queryClient.removeQueries({
           queryKey: ["screenshots"]

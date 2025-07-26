@@ -47,41 +47,101 @@ const SolutionSection = ({
   content: React.ReactNode
   isLoading: boolean
 
-}) => (
-  <div className="space-y-2">
-    <h2 className="text-[13px] font-medium text-white tracking-wide">
-      {title}
-    </h2>
-    {isLoading ? (
-      <div className="space-y-1.5">
-        <div className="mt-4 flex">
-          <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-            Loading solutions...
-          </p>
+}) => {
+  const [copied, setCopied] = useState(false)
+  const { showToast } = useToast()
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content as string)
+      setCopied(true)
+      showToast("Copied!", "Code copied to clipboard", "success")
+      setTimeout(() => setCopied(false), 2000)
+    } catch (error) {
+      console.error("Failed to copy code:", error)
+      showToast("Error", "Failed to copy code", "error")
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[13px] font-medium text-white tracking-wide">
+          {title}
+        </h2>
+        {!isLoading && content && (
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 px-2 py-1 text-xs bg-white/10 hover:bg-white/20 text-white/90 rounded transition-colors"
+          >
+            {copied ? (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-3 h-3"
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                Copied
+              </>
+            ) : (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-3 h-3"
+                >
+                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                </svg>
+                Copy
+              </>
+            )}
+          </button>
+        )}
+      </div>
+      {isLoading ? (
+        <div className="space-y-1.5">
+          <div className="mt-4 flex">
+            <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
+              Loading solutions...
+            </p>
+          </div>
         </div>
-      </div>
-    ) : (
-      <div className="w-full">
-        <SyntaxHighlighter
-          showLineNumbers
-          language={"cpp"}
-          style={dracula}
-          customStyle={{
-            maxWidth: "100%",
-            margin: 0,
-            padding: "1rem",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-            backgroundColor: "rgba(22, 27, 34, 0.5)"
-          }}
-          wrapLongLines={true}
-        >
-          {content as string}
-        </SyntaxHighlighter>
-      </div>
-    )}
-  </div>
-)
+      ) : (
+        <div className="w-full">
+          <SyntaxHighlighter
+            showLineNumbers
+            language={"cpp"}
+            style={dracula}
+            customStyle={{
+              maxWidth: "100%",
+              margin: 0,
+              padding: "1rem",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              backgroundColor: "rgba(22, 27, 34, 0.5)"
+            }}
+            wrapLongLines={true}
+          >
+            {content as string}
+          </SyntaxHighlighter>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export const ComplexitySection = ({
   timeComplexity,
@@ -141,6 +201,7 @@ const Solutions: React.FC<SolutionsProps> = ({
   const [spaceComplexityData, setSpaceComplexityData] = useState<string | null>(
     null
   )
+  const [debugNotesData, setDebugNotesData] = useState<string | null>(null)
 
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const [tooltipHeight, setTooltipHeight] = useState(0)
@@ -234,9 +295,15 @@ const Solutions: React.FC<SolutionsProps> = ({
         queryClient.removeQueries({
           queryKey: ["new_solution"]
         })
+        queryClient.removeQueries({
+          queryKey: ["problem_statement"]
+        })
 
         // Reset screenshots
         setExtraScreenshots([])
+        
+        // Reset debug notes
+        setDebugNotesData(null)
 
         // After a small delay, clear the resetting state
         setTimeout(() => {
@@ -249,6 +316,7 @@ const Solutions: React.FC<SolutionsProps> = ({
         setThoughtsData(null)
         setTimeComplexityData(null)
         setSpaceComplexityData(null)
+        setDebugNotesData(null)
       }),
       window.electronAPI.onProblemExtracted((data) => {
         queryClient.setQueryData(["problem_statement"], data)
@@ -274,11 +342,12 @@ const Solutions: React.FC<SolutionsProps> = ({
       }),
       //when the initial solution is generated, we'll set the solution data to that
       window.electronAPI.onSolutionSuccess((data) => {
+        console.log("Solution success received in Solutions component:", data)
         if (!data) {
           console.warn("Received empty or invalid solution data")
           return
         }
-        console.log({ data })
+        console.log("Processing solution data:", { data })
         const solutionData = {
           code: data.code,
           thoughts: data.thoughts,
@@ -287,10 +356,13 @@ const Solutions: React.FC<SolutionsProps> = ({
         }
 
         queryClient.setQueryData(["solution"], solutionData)
+        // Clear any debug solution when regular solution is received
+        queryClient.removeQueries({ queryKey: ["new_solution"] })
         setSolutionData(solutionData.code || null)
         setThoughtsData(solutionData.thoughts || null)
         setTimeComplexityData(solutionData.time_complexity || null)
         setSpaceComplexityData(solutionData.space_complexity || null)
+        setDebugNotesData(null)
 
         // Fetch latest screenshots when solution is successful
         const fetchScreenshots = async () => {
@@ -316,6 +388,13 @@ const Solutions: React.FC<SolutionsProps> = ({
       window.electronAPI.onDebugStart(() => {
         //we'll set the debug processing state to true and use that to render a little loader
         setDebugProcessing(true)
+      }),
+      //when debug is successful, update the solution data
+      window.electronAPI.onDebugSuccess((data) => {
+        console.log("Debug success received in Solutions:", data)
+        // Store the debug solution in the query cache
+        queryClient.setQueryData(["new_solution"], data)
+        setDebugProcessing(false)
       }),
       //when there was an error in the initial debugging, we'll show a toast and stop the little generating pulsing thing.
       window.electronAPI.onDebugError(() => {
@@ -346,7 +425,45 @@ const Solutions: React.FC<SolutionsProps> = ({
     setProblemStatementData(
       queryClient.getQueryData(["problem_statement"]) || null
     )
-    setSolutionData(queryClient.getQueryData(["solution"]) || null)
+    
+    // Check for regular solution first, then fall back to debug solution
+    const regularSolution = queryClient.getQueryData(["solution"]) as {
+      code: string
+      thoughts: string[]
+      time_complexity: string
+      space_complexity: string
+    } | null
+
+    console.log("Initializing Solutions component - regular solution:", regularSolution)
+
+    if (regularSolution) {
+      console.log("Setting regular solution data")
+      setSolutionData(regularSolution.code || null)
+      setThoughtsData(regularSolution.thoughts || null)
+      setTimeComplexityData(regularSolution.time_complexity || null)
+      setSpaceComplexityData(regularSolution.space_complexity || null)
+      setDebugNotesData(null)
+    } else {
+      // Only check for debug solution if no regular solution exists
+      const newSolution = queryClient.getQueryData(["new_solution"]) as {
+        new_code?: string
+        improvedSolution?: string
+        solution?: string
+        code?: string
+        thoughts?: string[]
+        time_complexity?: string
+        space_complexity?: string
+        debug_notes?: string
+      } | null
+
+      if (newSolution) {
+        setSolutionData(newSolution.new_code || newSolution.improvedSolution || newSolution.solution || newSolution.code || null)
+        setThoughtsData(newSolution.thoughts || null)
+        setTimeComplexityData(newSolution.time_complexity || null)
+        setSpaceComplexityData(newSolution.space_complexity || null)
+        setDebugNotesData(newSolution.debug_notes || null)
+      }
+    }
 
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       if (event?.query.queryKey[0] === "problem_statement") {
@@ -362,10 +479,46 @@ const Solutions: React.FC<SolutionsProps> = ({
           space_complexity: string
         } | null
 
-        setSolutionData(solution?.code ?? null)
-        setThoughtsData(solution?.thoughts ?? null)
-        setTimeComplexityData(solution?.time_complexity ?? null)
-        setSpaceComplexityData(solution?.space_complexity ?? null)
+        console.log("Solution query updated:", solution)
+
+        if (solution) {
+          // Prioritize regular solution over debug solution
+          console.log("Updating solution data from query subscription")
+          setSolutionData(solution.code ?? null)
+          setThoughtsData(solution.thoughts ?? null)
+          setTimeComplexityData(solution.time_complexity ?? null)
+          setSpaceComplexityData(solution.space_complexity ?? null)
+          setDebugNotesData(null)
+        }
+      }
+      if (event?.query.queryKey[0] === "new_solution") {
+        const newSolution = queryClient.getQueryData(["new_solution"]) as {
+          new_code?: string
+          improvedSolution?: string
+          solution?: string
+          code?: string
+          thoughts?: string[]
+          time_complexity?: string
+          space_complexity?: string
+          debug_notes?: string
+        } | null
+
+        // Only update with debug solution if no regular solution exists
+        const regularSolution = queryClient.getQueryData(["solution"]) as {
+          code: string
+          thoughts: string[]
+          time_complexity: string
+          space_complexity: string
+        } | null
+
+        if (newSolution && !regularSolution) {
+          // Update the solution data with the debug solution
+          setSolutionData(newSolution.new_code || newSolution.improvedSolution || newSolution.solution || newSolution.code || null)
+          setThoughtsData(newSolution.thoughts || null)
+          setTimeComplexityData(newSolution.time_complexity || null)
+          setSpaceComplexityData(newSolution.space_complexity || null)
+          setDebugNotesData(newSolution.debug_notes || null)
+        }
       }
     })
     return () => unsubscribe()
@@ -496,6 +649,14 @@ const Solutions: React.FC<SolutionsProps> = ({
                       spaceComplexity={spaceComplexityData}
                       isLoading={!timeComplexityData || !spaceComplexityData}
                     />
+
+                    {debugNotesData && (
+                      <ContentSection
+                        title="Debug Notes"
+                        content={debugNotesData}
+                        isLoading={false}
+                      />
+                    )}
                   </>
                 )}
               </div>

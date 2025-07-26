@@ -19,39 +19,101 @@ const CodeSection = ({
   code: React.ReactNode
   isLoading: boolean
 
-}) => (
-  <div className="space-y-2">
-    <h2 className="text-[13px] font-medium text-white tracking-wide"></h2>
-    {isLoading ? (
-      <div className="space-y-1.5">
-        <div className="mt-4 flex">
-          <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
-            Loading solutions...
-          </p>
+}) => {
+  const [copied, setCopied] = useState(false)
+  const { showToast } = useToast()
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code as string)
+      setCopied(true)
+      showToast("Copied!", "Code copied to clipboard", "success")
+      setTimeout(() => setCopied(false), 2000)
+    } catch (error) {
+      console.error("Failed to copy code:", error)
+      showToast("Error", "Failed to copy code", "error")
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[13px] font-medium text-white tracking-wide">
+          {title}
+        </h2>
+        {!isLoading && code && (
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 px-2 py-1 text-xs bg-white/10 hover:bg-white/20 text-white/90 rounded transition-colors"
+          >
+            {copied ? (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-3 h-3"
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                Copied
+              </>
+            ) : (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-3 h-3"
+                >
+                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                </svg>
+                Copy
+              </>
+            )}
+          </button>
+        )}
+      </div>
+      {isLoading ? (
+        <div className="space-y-1.5">
+          <div className="mt-4 flex">
+            <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
+              Loading solutions...
+            </p>
+          </div>
         </div>
-      </div>
-    ) : (
-      <div className="w-full">
-        <SyntaxHighlighter
-          showLineNumbers
-          language={"cpp"}
-          style={dracula} 
-          customStyle={{
-            maxWidth: "100%",
-            margin: 0,
-            padding: "1rem",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-            backgroundColor: "rgba(22, 27, 34, 0.5)"
-          }}
-          wrapLongLines={true}
-        >
-          {code as string}
-        </SyntaxHighlighter>
-      </div>
-    )}
-  </div>
-)
+      ) : (
+        <div className="w-full">
+          <SyntaxHighlighter
+            showLineNumbers
+            language={"cpp"}
+            style={dracula} 
+            customStyle={{
+              maxWidth: "100%",
+              margin: 0,
+              padding: "1rem",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              backgroundColor: "rgba(22, 27, 34, 0.5)"
+            }}
+            wrapLongLines={true}
+          >
+            {code as string}
+          </SyntaxHighlighter>
+        </div>
+      )}
+    </div>
+  )
+}
 
 async function fetchScreenshots(): Promise<Screenshot[]> {
   try {
@@ -126,7 +188,10 @@ const Debug: React.FC<DebugProps> = ({
     const cleanupFunctions = [
       window.electronAPI.onScreenshotTaken(() => refetch()),
       window.electronAPI.onResetView(() => refetch()),
-      window.electronAPI.onDebugSuccess(() => {
+      window.electronAPI.onDebugSuccess((data) => {
+        console.log("Debug success received:", data)
+        // Store the debug solution in the query cache
+        queryClient.setQueryData(["new_solution"], data)
         setIsProcessing(false)
       }),
       window.electronAPI.onDebugStart(() => {
