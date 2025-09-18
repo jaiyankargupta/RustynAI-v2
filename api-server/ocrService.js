@@ -2,13 +2,49 @@ const { execFile } = require("child_process");
 const sharp = require("sharp");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const { promisify } = require("util");
 const writeFile = promisify(fs.writeFile);
 const execFileAsync = promisify(execFile);
 
 class OCRService {
   constructor() {
-    console.log("OCR Service created - will use Tesseract CLI");
+    // Detect platform and set appropriate Tesseract executable
+    this.tesseractExecutable = this.getTesseractExecutable();
+    console.log(
+      `OCR Service created - will use Tesseract CLI: ${this.tesseractExecutable}`
+    );
+  }
+
+  getTesseractExecutable() {
+    const platform = os.platform();
+
+    if (platform === "win32") {
+      // Windows - try common installation paths
+      const windowsPaths = [
+        "tesseract", // If added to PATH
+        "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+        "C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe",
+        "tesseract.exe",
+      ];
+
+      // Return the first path that exists
+      for (const tesseractPath of windowsPaths) {
+        if (
+          fs.existsSync(tesseractPath) ||
+          tesseractPath === "tesseract" ||
+          tesseractPath === "tesseract.exe"
+        ) {
+          return tesseractPath;
+        }
+      }
+
+      // Default to tesseract if none found (user might have it in PATH)
+      return "tesseract";
+    } else {
+      // macOS, Linux, etc.
+      return "tesseract";
+    }
   }
 
   async preprocessImage(base64Image, index = 0) {
@@ -18,26 +54,30 @@ class OCRService {
       const imageBuffer = Buffer.from(base64Data, "base64");
       console.log(`Processing image of size: ${imageBuffer.length} bytes`);
 
-      // Generate debug file path
-      const debugDir = path.join(__dirname, "debug");
-      if (!fs.existsSync(debugDir)) {
-        fs.mkdirSync(debugDir);
-      }
-      const originalImagePath = path.join(
-        debugDir,
-        `image_${index}_original.png`
-      );
-      const processedImagePath = path.join(
-        debugDir,
-        `image_${index}_processed.png`
-      );
-
-      // Save original image for debugging
+      // Generate debug file path using OS temp directory (works in serverless environments)
+      const debugDir = path.join(os.tmpdir(), "ocr-debug");
       try {
-        await writeFile(originalImagePath, imageBuffer);
-        console.log(`Original image saved to: ${originalImagePath}`);
+        if (!fs.existsSync(debugDir)) {
+          fs.mkdirSync(debugDir, { recursive: true });
+        }
+        const originalImagePath = path.join(
+          debugDir,
+          `image_${index}_original.png`
+        );
+        const processedImagePath = path.join(
+          debugDir,
+          `image_${index}_processed.png`
+        );
+
+        // Save original image for debugging
+        try {
+          await writeFile(originalImagePath, imageBuffer);
+          console.log(`Original image saved to: ${originalImagePath}`);
+        } catch (err) {
+          console.log(`Couldn't save original image: ${err.message}`);
+        }
       } catch (err) {
-        console.log(`Couldn't save original image: ${err.message}`);
+        console.log(`Debug directory creation failed: ${err.message}`);
       }
 
       // Enhanced image processing for better OCR results
@@ -49,6 +89,10 @@ class OCRService {
 
       // Save processed image for debugging
       try {
+        const processedImagePath = path.join(
+          debugDir,
+          `image_${index}_processed.png`
+        );
         await writeFile(processedImagePath, processed);
         console.log(`Processed image saved to: ${processedImagePath}`);
       } catch (err) {
@@ -70,16 +114,19 @@ class OCRService {
       // Preprocess the image for better OCR results
       const processedImage = await this.preprocessImage(base64Image, index);
 
-      // Save processed image to a temp file
-      const tempDir = path.join(__dirname, "tmp");
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir);
-      }
-      const tempImagePath = path.join(tempDir, `image_${index}_tess.png`);
+      // Save processed image to OS temp directory (works in serverless environments)
+      const tempDir = os.tmpdir();
+      const tempImagePath = path.join(
+        tempDir,
+        `ocr_image_${index}_${Date.now()}.png`
+      );
       await writeFile(tempImagePath, processedImage);
 
       // Output file (Tesseract CLI will add .txt)
-      const tempOutputPath = path.join(tempDir, `output_${index}`);
+      const tempOutputPath = path.join(
+        tempDir,
+        `ocr_output_${index}_${Date.now()}`
+      );
 
       // Run tesseract CLI
       const tesseractArgs = [
@@ -90,7 +137,26 @@ class OCRService {
         "--psm",
         "6",
       ];
-      await execFileAsync("tesseract", tesseractArgs);
+
+      try {
+        await execFileAsync(this.tesseractExecutable, tesseractArgs);
+      } catch (tesseractError) {
+        // Clean up temp files on error
+        try {
+          fs.unlinkSync(tempImagePath);
+        } catch (cleanupErr) {
+          // Ignore cleanup errors
+        }
+
+        // Check if Tesseract is not installed
+        if (tesseractError.code === "ENOENT") {
+          throw new Error(
+            "Tesseract CLI is not available in this environment. OCR processing cannot be performed."
+          );
+        } else {
+          throw new Error(`Tesseract CLI failed: ${tesseractError.message}`);
+        }
+      }
 
       // Read the output text
       const outputTextPath = tempOutputPath + ".txt";

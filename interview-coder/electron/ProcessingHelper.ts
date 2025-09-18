@@ -9,6 +9,10 @@ import { BrowserWindow } from "electron";
 const isDev = !app.isPackaged;
 const API_BASE_URL = "http://localhost:3001";
 
+//"http://localhost:3001";
+
+// https://rustyn-ai.vercel.app
+
 export class ProcessingHelper {
   private deps: IProcessingHelperDeps;
   private screenshotHelper: ScreenshotHelper;
@@ -23,14 +27,14 @@ export class ProcessingHelper {
   }
 
   private async waitForInitialization(
-    mainWindow: BrowserWindow,
+    mainWindow: BrowserWindow
   ): Promise<void> {
     let attempts = 0;
     const maxAttempts = 50; // 5 seconds total
 
     while (attempts < maxAttempts) {
       const isInitialized = await mainWindow.webContents.executeJavaScript(
-        "window.__IS_INITIALIZED__",
+        "window.__IS_INITIALIZED__"
       );
       if (isInitialized) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -46,7 +50,7 @@ export class ProcessingHelper {
     const mainWindow = this.deps.getMainWindow();
     if (!mainWindow) {
       console.log(
-        "[ProcessingHelper] No mainWindow found, aborting processScreenshots.",
+        "[ProcessingHelper] No mainWindow found, aborting processScreenshots."
       );
       return;
     }
@@ -54,7 +58,7 @@ export class ProcessingHelper {
     const view = this.deps.getView();
     console.log(
       "[ProcessingHelper] processScreenshots called with view:",
-      view,
+      view
     );
     console.log("[ProcessingHelper] Received payload:", payload);
 
@@ -68,14 +72,14 @@ export class ProcessingHelper {
       console.log(
         "[ProcessingHelper] Valid payload received, calling /api/generate with:",
         payload.textList,
-        payload.language,
+        payload.language
       );
       try {
         this.currentProcessingAbortController = new AbortController();
         const { signal } = this.currentProcessingAbortController;
         const language = payload.language || "cpp";
         console.log(
-          `Processing direct text input with ${payload.textList.length} items`,
+          `Processing direct text input with ${payload.textList.length} items`
         );
         // Directly call /api/generate with textList and language
         const response = await axios.post(
@@ -95,26 +99,26 @@ export class ProcessingHelper {
             headers: {
               "Content-Type": "application/json",
             },
-          },
+          }
         );
         console.log(
-          `API direct text response received with status: ${response.status}`,
+          `API direct text response received with status: ${response.status}`
         );
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
-          response.data,
+          response.data
         );
         return { success: true, data: response.data };
       } catch (error: any) {
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-          error.message || "Server error. Please try again.",
+          error.message || "Server error. Please try again."
         );
         console.error("Processing error:", error);
         if (axios.isCancel(error)) {
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            "Processing was canceled by the user.",
+            "Processing was canceled by the user."
           );
         }
         // Reset view back to queue on error
@@ -142,21 +146,22 @@ export class ProcessingHelper {
 
         // Process the screenshots and extract text data
         console.log(
-          `Processing ${screenshotQueue.length} screenshots from queue`,
+          `Processing ${screenshotQueue.length} screenshots from queue`
         );
-        const screenshots =
-          await this.screenshotHelper.getScreenshotData(screenshotQueue);
+        const screenshots = await this.screenshotHelper.getScreenshotData(
+          screenshotQueue
+        );
 
         if (screenshots.length === 0) {
           console.error("No valid screenshots found in queue");
           mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS,
+            this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS
           );
           return;
         }
 
         console.log(
-          `Successfully processed ${screenshots.length}/${screenshotQueue.length} screenshots`,
+          `Successfully processed ${screenshots.length}/${screenshotQueue.length} screenshots`
         );
 
         // Extract the image data from screenshots
@@ -165,7 +170,7 @@ export class ProcessingHelper {
 
         // Make API call to process the screenshots
         console.log(
-          `Sending ${imageDataList.length} images for OCR processing`,
+          `Sending ${imageDataList.length} images for OCR processing`
         );
         // Add timestamp to help identify request in logs
         const requestId = Date.now();
@@ -188,7 +193,7 @@ export class ProcessingHelper {
             headers: {
               "Content-Type": "application/json",
             },
-          },
+          }
         );
 
         // Log response status
@@ -197,7 +202,7 @@ export class ProcessingHelper {
         // Send success event with data
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
-          response.data,
+          response.data
         );
 
         return { success: true, data: response.data };
@@ -206,14 +211,14 @@ export class ProcessingHelper {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            error.message || "Server error. Please try again.",
+            error.message || "Server error. Please try again."
           );
         }
 
         if (axios.isCancel(error)) {
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            "Processing was canceled by the user.",
+            "Processing was canceled by the user."
           );
         }
 
@@ -255,7 +260,7 @@ export class ProcessingHelper {
           headers: {
             "Content-Type": "application/json",
           },
-        },
+        }
       );
 
       return { success: true, data: response.data };
@@ -275,7 +280,7 @@ export class ProcessingHelper {
           mainWindow.webContents.send("reset-view");
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            "Request timed out. The server took too long to respond. Please try again.",
+            "Request timed out. The server took too long to respond. Please try again."
           );
         }
         return {
@@ -290,11 +295,11 @@ export class ProcessingHelper {
 
       if (
         error.response?.data?.error?.includes(
-          "Please close this window and re-enter a valid Open AI API key.",
+          "Please close this window and re-enter a valid Open AI API key."
         )
       ) {
         console.log(
-          "Please close this window and re-enter a valid Open AI API key.",
+          "Please close this window and re-enter a valid Open AI API key."
         );
       }
 
@@ -304,7 +309,7 @@ export class ProcessingHelper {
 
   private async processExtraScreenshotsHelper(
     screenshots: Array<{ path: string; data: string }>,
-    signal: AbortSignal,
+    signal: AbortSignal
   ) {
     try {
       const imageDataList = screenshots.map((screenshot) => screenshot.data);
@@ -316,7 +321,7 @@ export class ProcessingHelper {
       }
 
       console.log(
-        `Sending ${imageDataList.length} images for debug OCR processing`,
+        `Sending ${imageDataList.length} images for debug OCR processing`
       );
       const requestId = Date.now();
       console.log(`Debug Request ID: ${requestId}`);
@@ -339,11 +344,11 @@ export class ProcessingHelper {
           headers: {
             "Content-Type": "application/json",
           },
-        },
+        }
       );
 
       console.log(
-        `Debug API response received with status: ${response.status}`,
+        `Debug API response received with status: ${response.status}`
       );
 
       return { success: true, data: response.data };
@@ -376,7 +381,7 @@ export class ProcessingHelper {
             this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
             error.response?.data?.error ||
               error.message ||
-              "Operation failed. Please try again with clearer screenshots.",
+              "Operation failed. Please try again with clearer screenshots."
           );
         }
         return {
@@ -394,11 +399,11 @@ export class ProcessingHelper {
 
       if (
         error.response?.data?.error?.includes(
-          "Please close this window and re-enter a valid Open AI API key.",
+          "Please close this window and re-enter a valid Open AI API key."
         )
       ) {
         console.log(
-          "Please close this window and re-enter a valid Open AI API key.",
+          "Please close this window and re-enter a valid Open AI API key."
         );
       }
 

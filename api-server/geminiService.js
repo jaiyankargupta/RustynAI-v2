@@ -5,10 +5,11 @@ class GeminiService {
     // Load multiple API keys from environment variables
     this.apiKeys = [
       process.env.GEMINI_API_KEY,
-      process.env.GEMINI_API_KEY_2,
-      process.env.GEMINI_API_KEY_3,
-      process.env.GEMINI_API_KEY_4,
-      process.env.GEMINI_API_KEY_5,
+      process.env.GEMINI_API_KEY1,
+      process.env.GEMINI_API_KEY2,
+      process.env.GEMINI_API_KEY3,
+      process.env.GEMINI_API_KEY4,
+      process.env.GEMINI_API_KEY5,
     ].filter((key) => key && key.trim() !== ""); // Remove empty keys
 
     this.currentKeyIndex = 0;
@@ -17,7 +18,7 @@ class GeminiService {
 
     if (this.apiKeys.length === 0) {
       console.log(
-        "No Gemini API keys found. Please set GEMINI_API_KEY, GEMINI_API_KEY_2, etc."
+        "No Gemini API keys found. Please set GEMINI_API_KEY, GEMINI_API_KEY1, GEMINI_API_KEY2, etc."
       );
     } else {
       console.log(
@@ -214,7 +215,7 @@ class GeminiService {
   async extractProblem(extractedText, language = null) {
     if (this.apiKeys.length === 0) {
       throw new Error(
-        "No Gemini API keys available. Please set GEMINI_API_KEY, GEMINI_API_KEY_2, etc."
+        "No Gemini API keys available. Please set GEMINI_API_KEY, GEMINI_API_KEY1, GEMINI_API_KEY2, etc."
       );
     }
 
