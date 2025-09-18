@@ -1,40 +1,27 @@
-import React from "react"
-import ScreenshotItem from "./ScreenshotItem"
+import React from "react";
+// Import removed as we're not using ScreenshotItem anymore
 
 interface Screenshot {
-  path: string
-  preview: string
+  path: string;
+  preview: string;
 }
 
 interface ScreenshotQueueProps {
-  isLoading: boolean
-  screenshots: Screenshot[]
-  onDeleteScreenshot: (index: number) => void
+  isLoading: boolean;
+  screenshots: Screenshot[];
+  onDeleteScreenshot: (index: number) => void;
 }
 const ScreenshotQueue: React.FC<ScreenshotQueueProps> = ({
   isLoading,
   screenshots,
-  onDeleteScreenshot
+  onDeleteScreenshot,
 }) => {
   if (screenshots.length === 0) {
-    return <></>
+    return <></>;
   }
 
-  const displayScreenshots = screenshots.slice(0, 5)
+  // Don't display any images
+  return null;
+};
 
-  return (
-    <div className="flex gap-4">
-      {displayScreenshots.map((screenshot, index) => (
-        <ScreenshotItem
-          key={screenshot.path}
-          isLoading={isLoading}
-          screenshot={screenshot}
-          index={index}
-          onDelete={onDeleteScreenshot}
-        />
-      ))}
-    </div>
-  )
-}
-
-export default ScreenshotQueue
+export default ScreenshotQueue;

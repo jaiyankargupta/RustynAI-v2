@@ -1,182 +1,179 @@
-const Tesseract = require("tesseract.js");
+const { execFile } = require("child_process");
 const sharp = require("sharp");
+const path = require("path");
+const fs = require("fs");
+const { promisify } = require("util");
+const writeFile = promisify(fs.writeFile);
+const execFileAsync = promisify(execFile);
 
 class OCRService {
   constructor() {
-    console.log("🔍 OCR Service initialized with Tesseract.js");
+    console.log("OCR Service created - will use Tesseract CLI");
   }
 
-  /**
-   * Preprocess image for better OCR results
-   */
-  async preprocessImage(base64Image) {
+  async preprocessImage(base64Image, index = 0) {
     try {
       // Remove data URL prefix if present
-      const imageData = base64Image.replace(/^data:image\/[a-z]+;base64,/, "");
-      const imageBuffer = Buffer.from(imageData, "base64");
+      const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+      const imageBuffer = Buffer.from(base64Data, "base64");
+      console.log(`Processing image of size: ${imageBuffer.length} bytes`);
 
-      // Enhance image for better OCR results
-      const processedBuffer = await sharp(imageBuffer)
-        .resize(null, 1200, {
-          withoutEnlargement: true,
-          kernel: sharp.kernel.lanczos3,
-        })
-        .grayscale()
-        .normalize()
-        .sharpen()
-        .png()
-        .toBuffer();
+      // Generate debug file path
+      const debugDir = path.join(__dirname, "debug");
+      if (!fs.existsSync(debugDir)) {
+        fs.mkdirSync(debugDir);
+      }
+      const originalImagePath = path.join(
+        debugDir,
+        `image_${index}_original.png`
+      );
+      const processedImagePath = path.join(
+        debugDir,
+        `image_${index}_processed.png`
+      );
 
-      return processedBuffer;
-    } catch (error) {
-      console.error("Error preprocessing image:", error);
-      // Return original if preprocessing fails
-      const imageData = base64Image.replace(/^data:image\/[a-z]+;base64,/, "");
-      return Buffer.from(imageData, "base64");
-    }
-  }
-
-  /**
-   * Extract text from a single image using OCR
-   */
-  async extractTextFromImage(base64Image) {
-    try {
-      console.log("🔍 Starting OCR text extraction...");
-
-      // Preprocess image for better OCR
-      const processedImage = await this.preprocessImage(base64Image);
-
-      // Configure Tesseract for better accuracy
-      const worker = await Tesseract.createWorker("eng", 1, {
-        logger: (m) => {
-          if (m.status === "recognizing text") {
-            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
-          }
-        },
-      });
-
-      // Set parameters for better code/text recognition
-      await worker.setParameters({
-        tessedit_char_whitelist:
-          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .,;:!?()[]{}+-*/=<>\"'\n\t",
-        tessedit_pageseg_mode: Tesseract.PSM.AUTO,
-        preserve_interword_spaces: "1",
-      });
-
-      const {
-        data: { text },
-      } = await worker.recognize(processedImage);
-      await worker.terminate();
-
-      console.log(`✅ OCR completed. Extracted ${text.length} characters`);
-      return text.trim();
-    } catch (error) {
-      console.error("Error in OCR text extraction:", error);
-      throw new Error(`OCR failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Extract text from multiple images and combine
-   */
-  async extractTextFromImages(base64Images) {
-    try {
-      if (!Array.isArray(base64Images) || base64Images.length === 0) {
-        throw new Error("No images provided for OCR");
+      // Save original image for debugging
+      try {
+        await writeFile(originalImagePath, imageBuffer);
+        console.log(`Original image saved to: ${originalImagePath}`);
+      } catch (err) {
+        console.log(`Couldn't save original image: ${err.message}`);
       }
 
-      console.log(`🔍 Starting OCR for ${base64Images.length} images...`);
+      // Enhanced image processing for better OCR results
+      const processed = await sharp(imageBuffer)
+        .grayscale() // Convert to grayscale
+        .normalize() // Normalize contrast
+        .sharpen() // Sharpen the image
+        .toBuffer();
 
-      const extractedTexts = [];
+      // Save processed image for debugging
+      try {
+        await writeFile(processedImagePath, processed);
+        console.log(`Processed image saved to: ${processedImagePath}`);
+      } catch (err) {
+        console.log(`Couldn't save processed image: ${err.message}`);
+      }
 
+      return processed;
+    } catch (error) {
+      console.error("Image preprocessing failed:", error);
+      // If preprocessing fails, return original image buffer
+      const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+      return Buffer.from(base64Data, "base64");
+    }
+  }
+
+  async extractTextFromImage(base64Image, index = 0) {
+    try {
+      console.log("🔍 Processing image with Tesseract CLI...");
+      // Preprocess the image for better OCR results
+      const processedImage = await this.preprocessImage(base64Image, index);
+
+      // Save processed image to a temp file
+      const tempDir = path.join(__dirname, "tmp");
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir);
+      }
+      const tempImagePath = path.join(tempDir, `image_${index}_tess.png`);
+      await writeFile(tempImagePath, processedImage);
+
+      // Output file (Tesseract CLI will add .txt)
+      const tempOutputPath = path.join(tempDir, `output_${index}`);
+
+      // Run tesseract CLI
+      const tesseractArgs = [
+        tempImagePath,
+        tempOutputPath,
+        "-l",
+        "eng",
+        "--psm",
+        "6",
+      ];
+      await execFileAsync("tesseract", tesseractArgs);
+
+      // Read the output text
+      const outputTextPath = tempOutputPath + ".txt";
+      let extractedText = "";
+      try {
+        extractedText = fs.readFileSync(outputTextPath, "utf8").trim();
+      } catch (err) {
+        console.error("Failed to read Tesseract output:", err);
+      }
+
+      // Clean up temp files (optional, can be commented out for debugging)
+      try {
+        fs.unlinkSync(tempImagePath);
+        fs.unlinkSync(outputTextPath);
+      } catch (err) {
+        // Ignore cleanup errors
+      }
+
+      console.log("\n============ EXTRACTED TEXT START ============");
+      console.log(extractedText);
+      console.log("============= EXTRACTED TEXT END =============\n");
+
+      return extractedText;
+    } catch (error) {
+      console.error("OCR processing error (Tesseract CLI):", error);
+      throw new Error(`OCR processing failed: ${error.message}`);
+    }
+  }
+
+  async processImageBatch(base64Images) {
+    if (!Array.isArray(base64Images) || base64Images.length === 0) {
+      throw new Error("No images provided for OCR processing");
+    }
+
+    try {
+      console.log(
+        `🔄 Processing batch of ${base64Images.length} images with OCR`
+      );
+
+      // Process images sequentially to avoid worker issues
+      const results = [];
       for (let i = 0; i < base64Images.length; i++) {
-        console.log(`Processing image ${i + 1}/${base64Images.length}...`);
-        const text = await this.extractTextFromImage(base64Images[i]);
-        if (text && text.length > 10) {
-          // Only include meaningful text
-          extractedTexts.push(`--- Image ${i + 1} ---\n${text}`);
+        try {
+          console.log(`Processing image ${i + 1}/${base64Images.length}`);
+          const text = await this.extractTextFromImage(base64Images[i], i);
+          results.push(text);
+        } catch (error) {
+          console.error(`Failed to process image ${i + 1}:`, error.message);
+          results.push(""); // Return empty string for failed images
         }
       }
 
-      if (extractedTexts.length === 0) {
-        throw new Error(
-          "No meaningful text could be extracted from the images"
+      // Filter out empty results
+      const validResults = results.filter((text) => text.trim().length > 0);
+
+      // Log all valid extracted texts for verification
+      if (validResults.length > 0) {
+        console.log("\n========== ALL EXTRACTED TEXTS ==========");
+        validResults.forEach((text, idx) => {
+          console.log(`\n--- IMAGE ${idx + 1} TEXT ---`);
+          console.log(text);
+          console.log("-----------------------------");
+        });
+        console.log("=========================================\n");
+      }
+
+      if (validResults.length === 0) {
+        console.warn("⚠️ No valid text extracted from any images in the batch");
+      } else {
+        console.log(
+          `✅ Successfully extracted text from ${validResults.length}/${base64Images.length} images`
         );
       }
 
-      const combinedText = extractedTexts.join("\n\n");
-      console.log(
-        `✅ OCR completed for all images. Total text length: ${combinedText.length}`
-      );
-
-      return combinedText;
+      return validResults;
     } catch (error) {
-      console.error("Error in batch OCR:", error);
-      throw new Error(`Batch OCR failed: ${error.message}`);
+      console.error("❌ Batch processing failed:", error);
+      throw new Error(`OCR batch processing failed: ${error.message}`);
     }
   }
 
-  /**
-   * Clean and structure the extracted text for problem analysis
-   */
-  cleanExtractedText(rawText) {
-    try {
-      // Remove excessive whitespace and normalize line breaks
-      let cleanText = rawText
-        .replace(/\r\n/g, "\n")
-        .replace(/\r/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .replace(/[ \t]{2,}/g, " ")
-        .trim();
-
-      // Try to identify common problem statement sections
-      const sections = {
-        title: "",
-        description: "",
-        examples: [],
-        constraints: [],
-        raw: cleanText,
-      };
-
-      // Simple heuristics to extract structured information
-      const lines = cleanText
-        .split("\n")
-        .filter((line) => line.trim().length > 0);
-
-      // Look for title (usually first significant line or contains "Problem" or numbers)
-      const titlePatterns = [
-        /^\d+\.\s+(.+)/, // "1. Two Sum"
-        /^Problem\s*:?\s*(.+)/i, // "Problem: Two Sum"
-        /^(.+?)(?:\s*-\s*(?:Easy|Medium|Hard))?$/, // First line heuristic
-      ];
-
-      for (const line of lines.slice(0, 3)) {
-        for (const pattern of titlePatterns) {
-          const match = line.match(pattern);
-          if (match && !sections.title) {
-            sections.title = match[1]?.trim() || line.trim();
-            break;
-          }
-        }
-        if (sections.title) break;
-      }
-
-      // If no title found, use first meaningful line
-      if (!sections.title && lines.length > 0) {
-        sections.title = lines[0].trim();
-      }
-
-      return sections;
-    } catch (error) {
-      console.error("Error cleaning extracted text:", error);
-      return {
-        title: "Extracted Problem",
-        description: rawText,
-        examples: [],
-        constraints: [],
-        raw: rawText,
-      };
-    }
+  async terminate() {
+    // No-op for CLI version
   }
 }
 

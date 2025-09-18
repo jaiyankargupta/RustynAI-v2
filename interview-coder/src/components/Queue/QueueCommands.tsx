@@ -1,93 +1,119 @@
-import React, { useState, useEffect, useRef } from "react"
-import { useToast } from "../../contexts/toast"
-import { COMMAND_KEY } from "../../utils/platform"
+import { extractTextFromImage } from "../../lib/ocr";
+import React, { useState, useEffect, useRef } from "react";
+import { useToast } from "../../contexts/toast";
+import { COMMAND_KEY } from "../../utils/platform";
 
 interface QueueCommandsProps {
-  onTooltipVisibilityChange: (visible: boolean, height: number) => void
-  screenshotCount?: number
-
+  onTooltipVisibilityChange: (visible: boolean, height: number) => void;
+  screenshotCount?: number;
 }
 
 const QueueCommands: React.FC<QueueCommandsProps> = ({
   onTooltipVisibilityChange,
   screenshotCount = 0,
-
 }) => {
-  const [isTooltipVisible, setIsTooltipVisible] = useState(false)
-  const tooltipRef = useRef<HTMLDivElement>(null)
-  const { showToast } = useToast()
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const { showToast } = useToast();
+
+  // Helper to process screenshots with OCR and send to backend
+  const handleSolveWithOCR = async (
+    screenshots: string[],
+    language = "cpp",
+  ) => {
+    try {
+      // Extract text from each screenshot
+      const textList: string[] = [];
+      for (const screenshot of screenshots) {
+        const text = await extractTextFromImage(screenshot);
+        textList.push(text);
+      }
+      // Debug: Log the screenshots and extracted textList
+      console.log("[QueueCommands] Screenshots received:", screenshots);
+      console.log("[QueueCommands] Extracted textList:", textList);
+      // Use Electron API to trigger ProcessingHelper flow
+      const payload = { textList, language };
+      console.log(
+        "[QueueCommands] Sending payload to processScreenshots:",
+        payload,
+      );
+      const result = await window.electronAPI.processScreenshots(payload);
+      console.log(
+        "[QueueCommands] Received result from processScreenshots:",
+        result,
+      );
+      if (!result.success) {
+        showToast("Error", result.error || "Failed to process", "error");
+      } else {
+        showToast("Success", "Solution generated!", "success");
+        // You can handle result.data here (e.g., update view)
+      }
+    } catch (error) {
+      console.error("[QueueCommands] OCR/processing error:", error);
+      showToast("Error", "Failed to process screenshots", "error");
+    }
+  };
+
+  // Optionally, listen for screenshot base64s via event (recommended for robustness)
+  // useEffect(() => {
+  //   window.electronAPI.onScreenshotBase64s((screenshots: string[]) => {
+  //     // You can trigger OCR or update state here
+  //   });
+  //   return () => {
+  //     window.electronAPI.removeScreenshotBase64sListener();
+  //   };
+  // }, []);
 
   useEffect(() => {
-    let tooltipHeight = 0
+    let tooltipHeight = 0;
     if (tooltipRef.current && isTooltipVisible) {
-      tooltipHeight = tooltipRef.current.offsetHeight + 10
+      tooltipHeight = tooltipRef.current.offsetHeight + 10;
     }
-    onTooltipVisibilityChange(isTooltipVisible, tooltipHeight)
-  }, [isTooltipVisible])
+    onTooltipVisibilityChange(isTooltipVisible, tooltipHeight);
+  }, [isTooltipVisible]);
 
   const handleMouseEnter = () => {
-    setIsTooltipVisible(true)
-  }
+    setIsTooltipVisible(true);
+  };
 
   const handleMouseLeave = () => {
-    setIsTooltipVisible(false)
-  }
+    setIsTooltipVisible(false);
+  };
 
   return (
     <div>
       <div className="pt-2 w-fit">
         <div className="text-xs text-white/90 backdrop-blur-md bg-black/60 rounded-lg py-2 px-4 flex items-center justify-center gap-4">
           {/* Screenshot */}
-          <div
-            className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors"
-            onClick={async () => {
-              try {
-                const result = await window.electronAPI.triggerScreenshot()
-                if (!result.success) {
-                  console.error("Failed to take screenshot:", result.error)
-                  showToast("Error", "Failed to take screenshot", "error")
+          <div className="flex items-center gap-2">
+            <div
+              className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors"
+              onClick={async () => {
+                try {
+                  const result = await window.electronAPI.triggerScreenshot();
+                  if (!result.success) {
+                    console.error("Failed to take screenshot:", result.error);
+                    showToast("Error", "Failed to take screenshot", "error");
+                  }
+                } catch (error) {
+                  console.error("Error taking screenshot:", error);
+                  showToast("Error", "Failed to take screenshot", "error");
                 }
-              } catch (error) {
-                console.error("Error taking screenshot:", error)
-                showToast("Error", "Failed to take screenshot", "error")
-              }
-            }}
-          >
-            <span className="text-[11px] leading-none truncate">
-              {screenshotCount === 0
-                ? "Take first screenshot"
-                : screenshotCount === 1
-                ? "Take second screenshot"
-                : "Reset first screenshot"}
-            </span>
-            <div className="flex gap-1">
-              <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                {COMMAND_KEY}
-              </button>
-              <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                H
-              </button>
+              }}
+            >
+              <span className="text-[11px] leading-none truncate">
+                Screenshot ({screenshotCount})
+              </span>
+              <div className="flex gap-1">
+                <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
+                  {COMMAND_KEY}
+                </button>
+                <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
+                  H
+                </button>
+              </div>
             </div>
           </div>
-
-          {/* Solve Command */}
-          {screenshotCount > 0 && (
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] leading-none">Solve </span>
-                <div className="flex gap-1 ml-2">
-                  <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                    {COMMAND_KEY}
-                  </button>
-                  <button className="bg-white/10 rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-                    ↵
-                  </button>
-                </div>
-              </div>
-          )}
-
-          {/* Separator */}
-          <div className="mx-2 h-4 w-px bg-white/20" />
-
           {/* Settings with Tooltip */}
           <div
             className="relative inline-block"
@@ -130,25 +156,25 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                         onClick={async () => {
                           try {
                             const result =
-                              await window.electronAPI.toggleMainWindow()
+                              await window.electronAPI.toggleMainWindow();
                             if (!result.success) {
                               console.error(
                                 "Failed to toggle window:",
-                                result.error
-                              )
+                                result.error,
+                              );
                               showToast(
                                 "Error",
                                 "Failed to toggle window",
-                                "error"
-                              )
+                                "error",
+                              );
                             }
                           } catch (error) {
-                            console.error("Error toggling window:", error)
+                            console.error("Error toggling window:", error);
                             showToast(
                               "Error",
                               "Failed to toggle window",
-                              "error"
-                            )
+                              "error",
+                            );
                           }
                         }}
                       >
@@ -174,30 +200,30 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                         onClick={async () => {
                           try {
                             const result =
-                              await window.electronAPI.triggerScreenshot()
+                              await window.electronAPI.triggerScreenshot();
                             if (!result.success) {
                               console.error(
                                 "Failed to take screenshot:",
-                                result.error
-                              )
+                                result.error,
+                              );
                               showToast(
                                 "Error",
                                 "Failed to take screenshot",
-                                "error"
-                              )
+                                "error",
+                              );
                             }
                           } catch (error) {
-                            console.error("Error taking screenshot:", error)
+                            console.error("Error taking screenshot:", error);
                             showToast(
                               "Error",
                               "Failed to take screenshot",
-                              "error"
-                            )
+                              "error",
+                            );
                           }
                         }}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="truncate">Take Screenshot</span>
+                          <span className="truncate">Screenshot</span>
                           <div className="flex gap-1 flex-shrink-0">
                             <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] leading-none">
                               {COMMAND_KEY}
@@ -208,9 +234,89 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                           </div>
                         </div>
                         <p className="text-[10px] leading-relaxed text-white/70 truncate mt-1">
-                          Take a screenshot of the problem description.
+                          Screenshot count: {screenshotCount}
                         </p>
                       </div>
+
+                      {/* Remove Previous Screenshot Command */}
+                      {screenshotCount > 0 && (
+                        <div
+                          className="cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors"
+                          onClick={async () => {
+                            try {
+                              if (screenshotCount > 0) {
+                                // Get the screenshots
+                                const screenshotsResult =
+                                  await window.electronAPI.getScreenshots();
+
+                                if (
+                                  screenshotsResult.success &&
+                                  screenshotsResult.previews &&
+                                  screenshotsResult.previews.length > 0
+                                ) {
+                                  // Get the last screenshot
+                                  const lastScreenshot =
+                                    screenshotsResult.previews[
+                                      screenshotsResult.previews.length - 1
+                                    ];
+
+                                  // Delete it
+                                  const result =
+                                    await window.electronAPI.deleteScreenshot(
+                                      lastScreenshot.path,
+                                    );
+
+                                  if (result.success) {
+                                    showToast(
+                                      "Success",
+                                      "Previous screenshot removed",
+                                      "success",
+                                    );
+                                  } else {
+                                    showToast(
+                                      "Error",
+                                      result.error ||
+                                        "Failed to remove screenshot",
+                                      "error",
+                                    );
+                                  }
+                                } else {
+                                  showToast(
+                                    "Error",
+                                    "No screenshots found to remove",
+                                    "error",
+                                  );
+                                }
+                              }
+                            } catch (error) {
+                              console.error(
+                                "Error removing screenshot:",
+                                error,
+                              );
+                              showToast(
+                                "Error",
+                                "Failed to remove screenshot",
+                                "error",
+                              );
+                            }
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="truncate">Remove Screenshot</span>
+                            <div className="flex gap-1 flex-shrink-0">
+                              <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] leading-none">
+                                {COMMAND_KEY}
+                              </span>
+                              <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px] leading-none">
+                                G
+                              </span>
+                            </div>
+                          </div>
+                          <p className="text-[10px] leading-relaxed text-white/70 truncate mt-1">
+                            Remove the most recent screenshot (Cmd+G)
+                          </p>
+                        </div>
+                      )}
 
                       {/* Solve Command */}
                       <div
@@ -220,33 +326,26 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                             : "opacity-50 cursor-not-allowed"
                         }`}
                         onClick={async () => {
-                          if (screenshotCount === 0) return
-
-                          try {
-                            const result =
-                              await window.electronAPI.triggerProcessScreenshots()
-                            if (!result.success) {
-                              console.error(
-                                "Failed to process screenshots:",
-                                result.error
-                              )
-                              showToast(
-                                "Error",
-                                "Failed to process screenshots",
-                                "error"
-                              )
-                            }
-                          } catch (error) {
-                            console.error(
-                              "Error processing screenshots:",
-                              error
-                            )
+                          if (screenshotCount === 0) return;
+                          // Get screenshot base64s from electronAPI (or your state)
+                          const screenshotsResult =
+                            await window.electronAPI.getScreenshots();
+                          if (
+                            !screenshotsResult.success ||
+                            !screenshotsResult.previews
+                          ) {
                             showToast(
                               "Error",
-                              "Failed to process screenshots",
-                              "error"
-                            )
+                              screenshotsResult.error || "No screenshots found",
+                              "error",
+                            );
+                            return;
                           }
+                          // Extract base64 previews
+                          const screenshots = screenshotsResult.previews.map(
+                            (p) => p.preview,
+                          );
+                          await handleSolveWithOCR(screenshots, "cpp");
                         }}
                       >
                         <div className="flex items-center justify-between">
@@ -267,7 +366,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                         </p>
                       </div>
                     </div>
-
                   </div>
                 </div>
               </div>
@@ -276,7 +374,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default QueueCommands
+export default QueueCommands;

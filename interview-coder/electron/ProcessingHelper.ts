@@ -1,328 +1,245 @@
 // ProcessingHelper.ts
-import fs from "node:fs"
-import { ScreenshotHelper } from "./ScreenshotHelper"
-import { IProcessingHelperDeps } from "./main"
-import axios from "axios"
-import { app } from "electron"
-import { BrowserWindow } from "electron"
+import fs from "node:fs";
+import { ScreenshotHelper } from "./ScreenshotHelper";
+import { IProcessingHelperDeps } from "./main";
+import axios from "axios";
+import { app } from "electron";
+import { BrowserWindow } from "electron";
 
-const isDev = !app.isPackaged
-const API_BASE_URL = isDev
-  ? "http://localhost:3001"
-  : "https://rustynai.onrender.com"
+const isDev = !app.isPackaged;
+const API_BASE_URL = "http://localhost:3001";
 
 export class ProcessingHelper {
-  private deps: IProcessingHelperDeps
-  private screenshotHelper: ScreenshotHelper
+  private deps: IProcessingHelperDeps;
+  private screenshotHelper: ScreenshotHelper;
 
   // AbortControllers for API requests
-  private currentProcessingAbortController: AbortController | null = null
-  private currentExtraProcessingAbortController: AbortController | null = null
+  private currentProcessingAbortController: AbortController | null = null;
+  private currentExtraProcessingAbortController: AbortController | null = null;
 
   constructor(deps: IProcessingHelperDeps) {
-    this.deps = deps
-    this.screenshotHelper = deps.getScreenshotHelper()
+    this.deps = deps;
+    this.screenshotHelper = deps.getScreenshotHelper();
   }
 
   private async waitForInitialization(
-    mainWindow: BrowserWindow
+    mainWindow: BrowserWindow,
   ): Promise<void> {
-    let attempts = 0
-    const maxAttempts = 50 // 5 seconds total
+    let attempts = 0;
+    const maxAttempts = 50; // 5 seconds total
 
     while (attempts < maxAttempts) {
       const isInitialized = await mainWindow.webContents.executeJavaScript(
-        "window.__IS_INITIALIZED__"
-      )
-      if (isInitialized) return
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      attempts++
+        "window.__IS_INITIALIZED__",
+      );
+      if (isInitialized) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      attempts++;
     }
-    throw new Error("App failed to initialize after 5 seconds")
+    throw new Error("App failed to initialize after 5 seconds");
   }
 
+  public async processScreenshots(payload?: {
+    textList?: string[];
+    language?: string;
+  }): Promise<{ success: boolean; error?: string; data?: any } | void> {
+    const mainWindow = this.deps.getMainWindow();
+    if (!mainWindow) {
+      console.log(
+        "[ProcessingHelper] No mainWindow found, aborting processScreenshots.",
+      );
+      return;
+    }
 
+    const view = this.deps.getView();
+    console.log(
+      "[ProcessingHelper] processScreenshots called with view:",
+      view,
+    );
+    console.log("[ProcessingHelper] Received payload:", payload);
 
-
-
-  public async processScreenshots(): Promise<void> {
-    const mainWindow = this.deps.getMainWindow()
-    if (!mainWindow) return
-
-
-
-    const view = this.deps.getView()
-    console.log("Processing screenshots in view:", view)
-
-    if (view === "queue") {
-      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
-      const screenshotQueue = this.screenshotHelper.getScreenshotQueue()
-      console.log("Processing main queue screenshots:", screenshotQueue)
-      if (screenshotQueue.length === 0) {
-        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
-        return
-      }
-
+    // If payload is provided, use it for direct API call
+    if (
+      payload &&
+      payload.textList &&
+      Array.isArray(payload.textList) &&
+      payload.textList.length > 0
+    ) {
+      console.log(
+        "[ProcessingHelper] Valid payload received, calling /api/generate with:",
+        payload.textList,
+        payload.language,
+      );
       try {
-        // Initialize AbortController
-        this.currentProcessingAbortController = new AbortController()
-        const { signal } = this.currentProcessingAbortController
-
-        const screenshots = await Promise.all(
-          screenshotQueue.map(async (path) => ({
-            path,
-            preview: await this.screenshotHelper.getImagePreview(path),
-            data: fs.readFileSync(path).toString("base64")
-          }))
-        )
-
-        const result = await this.processScreenshotsHelper(screenshots, signal)
-
-        if (!result.success) {
-          console.log("Processing failed:", result.error)
-
-          if (result.error?.includes("OpenAI API key not found")) {
-            mainWindow.webContents.send(
-              this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-              "OpenAI API key not found in environment variables. Please set the OPEN_AI_API_KEY environment variable."
-            )
-          } else {
-            mainWindow.webContents.send(
-              this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-              result.error
-            )
-          }
-          // Reset view back to queue on error
-          console.log("Resetting view to queue due to error")
-          this.deps.setView("queue")
-          return
-        }
-
-        // Only set view to solutions if processing succeeded
-        console.log("Setting view to solutions after successful processing")
+        this.currentProcessingAbortController = new AbortController();
+        const { signal } = this.currentProcessingAbortController;
+        const language = payload.language || "cpp";
+        console.log(
+          `Processing direct text input with ${payload.textList.length} items`,
+        );
+        // Directly call /api/generate with textList and language
+        const response = await axios.post(
+          `${API_BASE_URL}/api/generate`,
+          {
+            textList: payload.textList,
+            language,
+            requestId: Date.now(), // Add request ID for tracking
+          },
+          {
+            signal,
+            timeout: 300000,
+            validateStatus: function (status) {
+              return status < 500;
+            },
+            maxRedirects: 5,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+        console.log(
+          `API direct text response received with status: ${response.status}`,
+        );
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
-          result.data
-        )
-        this.deps.setView("solutions")
+          response.data,
+        );
+        return { success: true, data: response.data };
       } catch (error: any) {
         mainWindow.webContents.send(
           this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-          error
-        )
-        console.error("Processing error:", error)
+          error.message || "Server error. Please try again.",
+        );
+        console.error("Processing error:", error);
         if (axios.isCancel(error)) {
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            "Processing was canceled by the user."
-          )
-        } else {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            error.message || "Server error. Please try again."
-          )
+            "Processing was canceled by the user.",
+          );
         }
         // Reset view back to queue on error
-        console.log("Resetting view to queue due to error")
-        this.deps.setView("queue")
+        console.log("Resetting view to queue due to error");
+        this.deps.setView("queue");
+        return {
+          success: false,
+          error: error.message || "Server error. Please try again.",
+        };
       } finally {
-        this.currentProcessingAbortController = null
+        this.currentProcessingAbortController = null;
       }
-    } else {
-      // view == 'solutions'
-      const extraScreenshotQueue =
-        this.screenshotHelper.getExtraScreenshotQueue()
-      console.log("Processing extra queue screenshots:", extraScreenshotQueue)
-      if (extraScreenshotQueue.length === 0) {
-        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
-        return
+    }
+    if (view === "queue") {
+      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START);
+      const screenshotQueue = this.screenshotHelper.getScreenshotQueue();
+      console.log("Processing main queue screenshots:", screenshotQueue);
+      if (screenshotQueue.length === 0) {
+        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
+        return;
       }
-      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.DEBUG_START)
-
-      // Initialize AbortController
-      this.currentExtraProcessingAbortController = new AbortController()
-      const { signal } = this.currentExtraProcessingAbortController
-
       try {
-        const screenshots = await Promise.all(
-          [
-            ...this.screenshotHelper.getScreenshotQueue(),
-            ...extraScreenshotQueue
-          ].map(async (path) => ({
-            path,
-            preview: await this.screenshotHelper.getImagePreview(path),
-            data: fs.readFileSync(path).toString("base64")
-          }))
-        )
+        this.currentProcessingAbortController = new AbortController();
+        const { signal } = this.currentProcessingAbortController;
+
+        // Process the screenshots and extract text data
         console.log(
-          "Combined screenshots for processing:",
-          screenshots.map((s) => s.path)
-        )
+          `Processing ${screenshotQueue.length} screenshots from queue`,
+        );
+        const screenshots =
+          await this.screenshotHelper.getScreenshotData(screenshotQueue);
 
-        const result = await this.processExtraScreenshotsHelper(
-          screenshots,
-          signal
-        )
-
-        if (result.success) {
-          this.deps.setHasDebugged(true)
+        if (screenshots.length === 0) {
+          console.error("No valid screenshots found in queue");
           mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.DEBUG_SUCCESS,
-            result.data
-          )
-        } else {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
-            result.error
-          )
+            this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS,
+          );
+          return;
         }
+
+        console.log(
+          `Successfully processed ${screenshots.length}/${screenshotQueue.length} screenshots`,
+        );
+
+        // Extract the image data from screenshots
+        const imageDataList = screenshots.map((screenshot) => screenshot.data);
+        console.log(`Prepared ${imageDataList.length} images for processing`);
+
+        // Make API call to process the screenshots
+        console.log(
+          `Sending ${imageDataList.length} images for OCR processing`,
+        );
+        // Add timestamp to help identify request in logs
+        const requestId = Date.now();
+        console.log(`Request ID: ${requestId}`);
+
+        const response = await axios.post(
+          `${API_BASE_URL}/api/generate`,
+          {
+            imageDataList: imageDataList,
+            language: "cpp",
+            requestId: requestId,
+          },
+          {
+            signal,
+            timeout: 300000,
+            validateStatus: function (status) {
+              return status < 500;
+            },
+            maxRedirects: 5,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+
+        // Log response status
+        console.log(`API response received with status: ${response.status}`);
+
+        // Send success event with data
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
+          response.data,
+        );
+
+        return { success: true, data: response.data };
       } catch (error: any) {
+        console.error("Processing error:", error);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+            error.message || "Server error. Please try again.",
+          );
+        }
+
         if (axios.isCancel(error)) {
           mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
-            "Extra processing was canceled by the user."
-          )
-        } else {
-          mainWindow.webContents.send(
-            this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
-            error.message
-          )
+            this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
+            "Processing was canceled by the user.",
+          );
         }
+
+        // Reset view back to queue on error
+        console.log("Resetting view to queue due to error");
+        this.deps.setView("queue");
+
+        return {
+          success: false,
+          error: error.message || "Server error. Please try again.",
+        };
       } finally {
-        this.currentExtraProcessingAbortController = null
+        this.currentProcessingAbortController = null;
       }
-    }
-  }
-
-  private async processScreenshotsHelper(
-    screenshots: Array<{ path: string; data: string }>,
-    signal: AbortSignal
-  ) {
-    const MAX_RETRIES = 0
-    let retryCount = 0
-
-    while (retryCount <= MAX_RETRIES) {
-      try {
-        const imageDataList = screenshots.map((screenshot) => screenshot.data)
-        const mainWindow = this.deps.getMainWindow()
-        const language = "cpp"
-        let problemInfo
-
-        // First API call - extract problem info
-        try {
-          const extractResponse = await axios.post(
-            `${API_BASE_URL}/api/extract`,
-            { imageDataList, language },
-            {
-              signal,
-              timeout: 300000,
-              validateStatus: function (status) {
-                return status < 500
-              },
-              maxRedirects: 5,
-              headers: {
-                "Content-Type": "application/json"
-              }
-            }
-          )
-
-          problemInfo = extractResponse.data
-
-          // Store problem info in AppState
-          this.deps.setProblemInfo(problemInfo)
-
-          // Send first success event
-          if (mainWindow) {
-            mainWindow.webContents.send(
-              this.deps.PROCESSING_EVENTS.PROBLEM_EXTRACTED,
-              problemInfo
-            )
-
-            // Generate solutions after successful extraction
-            const solutionsResult = await this.generateSolutionsHelper(signal)
-            if (solutionsResult.success) {
-              // Clear any existing extra screenshots before transitioning to solutions view
-              this.screenshotHelper.clearExtraScreenshotQueue()
-              mainWindow.webContents.send(
-                this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
-                solutionsResult.data
-              )
-              return { success: true, data: solutionsResult.data }
-            } else {
-              throw new Error(
-                solutionsResult.error || "Failed to generate solutions"
-              )
-            }
-          }
-        } catch (error: any) {
-          // If the request was cancelled, don't retry
-          if (axios.isCancel(error)) {
-            return {
-              success: false,
-              error: "Processing was canceled by the user."
-            }
-          }
-
-          console.error("API Error Details:", {
-            status: error.response?.status,
-            data: error.response?.data,
-            message: error.message,
-            code: error.code
-          })
-
-          // Handle API-specific errors
-          if (
-            error.response?.data?.error &&
-            typeof error.response.data.error === "string"
-          ) {
-            if (error.response.data.error.includes("Operation timed out")) {
-              throw new Error(
-                "Operation timed out after 1 minute. Please try again."
-              )
-            }
-            // Remove credit-related error handling
-            // if (error.response.data.error.includes("API Key out of credits")) {
-            //   throw new Error(error.response.data.error)
-            // }
-            throw new Error(error.response.data.error)
-          }
-
-          // If we get here, it's an unknown error
-          throw new Error(error.message || "Server error. Please try again.")
-        }
-      } catch (error: any) {
-        // Log the full error for debugging
-        console.error("Processing error details:", {
-          message: error.message,
-          code: error.code,
-          response: error.response?.data,
-          retryCount
-        })
-
-        // If it's a cancellation or we've exhausted retries, return the error
-        if (axios.isCancel(error) || retryCount >= MAX_RETRIES) {
-          return { success: false, error: error.message }
-        }
-
-        // Increment retry count and continue
-        retryCount++
-      }
-    }
-
-    // If we get here, all retries failed
-    return {
-      success: false,
-      error: "Failed to process after multiple attempts. Please try again."
+    } else {
+      // ...existing code for solutions view...
     }
   }
 
   private async generateSolutionsHelper(signal: AbortSignal) {
     try {
-      const problemInfo = this.deps.getProblemInfo()
-      const language = "cpp"
+      const problemInfo = this.deps.getProblemInfo();
+      const language = "cpp";
 
       if (!problemInfo) {
-        throw new Error("No problem info available")
+        throw new Error("No problem info available");
       }
 
       const response = await axios.post(
@@ -332,156 +249,188 @@ export class ProcessingHelper {
           signal,
           timeout: 300000,
           validateStatus: function (status) {
-            return status < 500
+            return status < 500;
           },
           maxRedirects: 5,
           headers: {
-            "Content-Type": "application/json"
-          }
-        }
-      )
+            "Content-Type": "application/json",
+          },
+        },
+      );
 
-      return { success: true, data: response.data }
+      return { success: true, data: response.data };
     } catch (error: any) {
-      const mainWindow = this.deps.getMainWindow()
+      const mainWindow = this.deps.getMainWindow();
 
       // Handle timeout errors (both 504 and axios timeout)
       if (error.code === "ECONNABORTED" || error.response?.status === 504) {
         // Cancel ongoing API requests
-        this.cancelOngoingRequests()
+        this.cancelOngoingRequests();
         // Clear both screenshot queues
-        this.deps.clearQueues()
+        this.deps.clearQueues();
         // Update view state to queue
-        this.deps.setView("queue")
+        this.deps.setView("queue");
         // Notify renderer to switch view
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("reset-view")
+          mainWindow.webContents.send("reset-view");
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-            "Request timed out. The server took too long to respond. Please try again."
-          )
+            "Request timed out. The server took too long to respond. Please try again.",
+          );
         }
         return {
           success: false,
-          error: "Request timed out. Please try again."
-        }
+          error: "Request timed out. Please try again.",
+        };
       }
 
       if (error.response?.data?.error?.includes("OpenAI API key not found")) {
-        console.log("OpenAI API key not found")
+        console.log("OpenAI API key not found");
       }
 
       if (
         error.response?.data?.error?.includes(
-          "Please close this window and re-enter a valid Open AI API key."
+          "Please close this window and re-enter a valid Open AI API key.",
         )
       ) {
-        console.log("Please close this window and re-enter a valid Open AI API key.")
+        console.log(
+          "Please close this window and re-enter a valid Open AI API key.",
+        );
       }
 
-      return { success: false, error: error.message }
+      return { success: false, error: error.message };
     }
   }
 
   private async processExtraScreenshotsHelper(
     screenshots: Array<{ path: string; data: string }>,
-    signal: AbortSignal
+    signal: AbortSignal,
   ) {
     try {
-      const imageDataList = screenshots.map((screenshot) => screenshot.data)
-      const problemInfo = this.deps.getProblemInfo()
-      const language = "cpp"
+      const imageDataList = screenshots.map((screenshot) => screenshot.data);
+      const problemInfo = this.deps.getProblemInfo();
+      const language = "cpp";
 
       if (!problemInfo) {
-        throw new Error("No problem info available")
+        throw new Error("No problem info available");
       }
+
+      console.log(
+        `Sending ${imageDataList.length} images for debug OCR processing`,
+      );
+      const requestId = Date.now();
+      console.log(`Debug Request ID: ${requestId}`);
 
       const response = await axios.post(
         `${API_BASE_URL}/api/debug`,
-        { imageDataList, problemInfo, language },
+        {
+          imageDataList: imageDataList,
+          problemInfo,
+          language,
+          requestId: requestId,
+        },
         {
           signal,
           timeout: 300000,
           validateStatus: function (status) {
-            return status < 500
+            return status < 500;
           },
           maxRedirects: 5,
           headers: {
-            "Content-Type": "application/json"
-          }
-        }
-      )
+            "Content-Type": "application/json",
+          },
+        },
+      );
 
-      return { success: true, data: response.data }
+      console.log(
+        `Debug API response received with status: ${response.status}`,
+      );
+
+      return { success: true, data: response.data };
     } catch (error: any) {
-      const mainWindow = this.deps.getMainWindow()
+      const mainWindow = this.deps.getMainWindow();
 
       // Handle cancellation first
       if (axios.isCancel(error)) {
         return {
           success: false,
-          error: "Processing was canceled by the user."
-        }
+          error: "Processing was canceled by the user.",
+        };
       }
 
-      if (error.response?.data?.error?.includes("Operation timed out")) {
+      if (
+        error.response?.data?.error?.includes("Operation timed out") ||
+        error.response?.data?.error?.includes("OCR") ||
+        error.message.includes("timeout")
+      ) {
         // Cancel ongoing API requests
-        this.cancelOngoingRequests()
+        this.cancelOngoingRequests();
         // Clear both screenshot queues
-        this.deps.clearQueues()
+        this.deps.clearQueues();
         // Update view state to queue
-        this.deps.setView("queue")
+        this.deps.setView("queue");
         // Notify renderer to switch view
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("reset-view")
+          mainWindow.webContents.send("reset-view");
           mainWindow.webContents.send(
             this.deps.PROCESSING_EVENTS.DEBUG_ERROR,
-            "Operation timed out after 1 minute. Please try again."
-          )
+            error.response?.data?.error ||
+              error.message ||
+              "Operation failed. Please try again with clearer screenshots.",
+          );
         }
         return {
           success: false,
-          error: "Operation timed out after 1 minute. Please try again."
-        }
+          error:
+            error.response?.data?.error ||
+            error.message ||
+            "Operation failed. Please try again with clearer screenshots.",
+        };
       }
 
       if (error.response?.data?.error?.includes("OpenAI API key not found")) {
-        console.log("OpenAI API key not found")
+        console.log("OpenAI API key not found");
       }
 
-      if (error.response?.data?.error?.includes("Please close this window and re-enter a valid Open AI API key.")) {
-        console.log("Please close this window and re-enter a valid Open AI API key.")
+      if (
+        error.response?.data?.error?.includes(
+          "Please close this window and re-enter a valid Open AI API key.",
+        )
+      ) {
+        console.log(
+          "Please close this window and re-enter a valid Open AI API key.",
+        );
       }
 
-      return { success: false, error: error.message }
+      return { success: false, error: error.message };
     }
   }
 
   public cancelOngoingRequests(): void {
-    let wasCancelled = false
+    let wasCancelled = false;
 
     if (this.currentProcessingAbortController) {
-      this.currentProcessingAbortController.abort()
-      this.currentProcessingAbortController = null
-      wasCancelled = true
+      this.currentProcessingAbortController.abort();
+      this.currentProcessingAbortController = null;
+      wasCancelled = true;
     }
 
     if (this.currentExtraProcessingAbortController) {
-      this.currentExtraProcessingAbortController.abort()
-      this.currentExtraProcessingAbortController = null
-      wasCancelled = true
+      this.currentExtraProcessingAbortController.abort();
+      this.currentExtraProcessingAbortController = null;
+      wasCancelled = true;
     }
 
     // Reset hasDebugged flag
-    this.deps.setHasDebugged(false)
+    this.deps.setHasDebugged(false);
 
     // Clear any pending state
-    this.deps.setProblemInfo(null)
+    this.deps.setProblemInfo(null);
 
-    const mainWindow = this.deps.getMainWindow()
+    const mainWindow = this.deps.getMainWindow();
     if (wasCancelled && mainWindow && !mainWindow.isDestroyed()) {
       // Send a clear message that processing was cancelled
-      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
+      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
     }
   }
 }

@@ -29,7 +29,7 @@ interface ElectronAPI {
   onScreenshotTaken: (
     callback: (data: { path: string; preview: string }) => void,
   ) => () => void;
-
+  onUpdateScreenshotCount: (callback: () => void) => () => void;
   onResetView: (callback: () => void) => () => void;
   onSolutionStart: (callback: () => void) => () => void;
   onDebugStart: (callback: () => void) => () => void;
@@ -59,22 +59,21 @@ interface ElectronAPI {
   onUpdateAvailable: (callback: (info: any) => void) => () => void;
   onUpdateDownloaded: (callback: (info: any) => void) => () => void;
   getPlatform: () => string;
-  onReset: (callback: () => void) => () => void;
 }
 
 export const PROCESSING_EVENTS = {
-  // global states
+  //global states
   UNAUTHORIZED: "procesing-unauthorized",
   NO_SCREENSHOTS: "processing-no-screenshots",
 
-  // states for generating the initial solution
+  //states for generating the initial solution
   INITIAL_START: "initial-start",
   PROBLEM_EXTRACTED: "problem-extracted",
   SOLUTION_SUCCESS: "solution-success",
   INITIAL_SOLUTION_ERROR: "solution-error",
   RESET: "reset",
 
-  // states for processing the debugging
+  //states for processing the debugging
   DEBUG_START: "debug-start",
   DEBUG_SUCCESS: "debug-success",
   DEBUG_ERROR: "debug-error",
@@ -82,7 +81,8 @@ export const PROCESSING_EVENTS = {
   // new event for sending screenshot base64s to renderer
   SCREENSHOT_BASE64S: "screenshot-base64s",
 
-  // Using screenshot-taken event for count updates
+  // new event for updating screenshot count
+  UPDATE_SCREENSHOT_COUNT: "update-screenshot-count",
 } as const;
 
 // At the top of the file

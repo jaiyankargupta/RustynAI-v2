@@ -1,144 +1,152 @@
-import React, { useState, useEffect, useRef } from "react"
-import { useQuery } from "@tanstack/react-query"
-import ScreenshotQueue from "../components/Queue/ScreenshotQueue"
-import QueueCommands from "../components/Queue/QueueCommands"
+import React, { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import ScreenshotQueue from "../components/Queue/ScreenshotQueue";
+import QueueCommands from "../components/Queue/QueueCommands";
 
-import { useToast } from "../contexts/toast"
-import { Screenshot } from "../types/screenshots"
+import { useToast } from "../contexts/toast";
+import { Screenshot } from "../types/screenshots";
 
 async function fetchScreenshots(): Promise<Screenshot[]> {
   try {
-    const existing = await window.electronAPI.getScreenshots()
-    return existing
+    const result = await window.electronAPI.getScreenshots();
+    console.log("Screenshots fetched:", result);
+
+    // Handle different return formats
+    if (result && Array.isArray(result)) {
+      return result;
+    } else if (
+      result &&
+      result.success &&
+      result.previews &&
+      Array.isArray(result.previews)
+    ) {
+      return result.previews;
+    }
+    return [];
   } catch (error) {
-    console.error("Error loading screenshots:", error)
-    throw error
+    console.error("Error loading screenshots:", error);
+    return [];
   }
 }
 
 interface QueueProps {
-  setView: (view: "queue" | "solutions" | "debug") => void
-
+  setView: (view: "queue" | "solutions" | "debug") => void;
 }
 
-const Queue: React.FC<QueueProps> = ({
-  setView,
- 
-}) => {
-  const { showToast } = useToast()
+const Queue: React.FC<QueueProps> = ({ setView }) => {
+  const { showToast } = useToast();
 
-  const [isTooltipVisible, setIsTooltipVisible] = useState(false)
-  const [tooltipHeight, setTooltipHeight] = useState(0)
-  const contentRef = useRef<HTMLDivElement>(null)
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+  const [tooltipHeight, setTooltipHeight] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
 
+  // We're fetching the screenshots but only using the count
   const {
     data: screenshots = [],
     isLoading,
-    refetch
+    refetch: refetchScreenshots,
   } = useQuery<Screenshot[]>({
     queryKey: ["screenshots"],
     queryFn: fetchScreenshots,
     staleTime: Infinity,
     gcTime: Infinity,
-    refetchOnWindowFocus: false
-  })
+    refetchOnWindowFocus: false,
+  });
 
   const handleDeleteScreenshot = async (index: number) => {
-    const screenshotToDelete = screenshots[index]
+    const screenshotToDelete = screenshots[index];
 
     try {
       const response = await window.electronAPI.deleteScreenshot(
-        screenshotToDelete.path
-      )
+        screenshotToDelete.path,
+      );
 
       if (response.success) {
-        refetch() // Refetch screenshots instead of managing state directly
+        refetchScreenshots(); // Refetch screenshots instead of managing state directly
       } else {
-        console.error("Failed to delete screenshot:", response.error)
-        showToast("Error", "Failed to delete the screenshot file", "error")
+        console.error("Failed to delete screenshot:", response.error);
+        showToast("Error", "Failed to delete the screenshot file", "error");
       }
     } catch (error) {
-      console.error("Error deleting screenshot:", error)
+      console.error("Error deleting screenshot:", error);
     }
-  }
+  };
 
   useEffect(() => {
     // Height update logic
     const updateDimensions = () => {
       if (contentRef.current) {
-        let contentHeight = contentRef.current.scrollHeight
-        const contentWidth = contentRef.current.scrollWidth
+        let contentHeight = contentRef.current.scrollHeight;
+        const contentWidth = contentRef.current.scrollWidth;
         if (isTooltipVisible) {
-          contentHeight += tooltipHeight
+          contentHeight += tooltipHeight;
         }
         window.electronAPI.updateContentDimensions({
           width: contentWidth,
-          height: contentHeight
-        })
+          height: contentHeight,
+        });
       }
-    }
+    };
 
     // Initialize resize observer
-    const resizeObserver = new ResizeObserver(updateDimensions)
+    const resizeObserver = new ResizeObserver(updateDimensions);
     if (contentRef.current) {
-      resizeObserver.observe(contentRef.current)
+      resizeObserver.observe(contentRef.current);
     }
-    updateDimensions()
+    updateDimensions();
 
     // Set up event listeners
     const cleanupFunctions = [
-      window.electronAPI.onScreenshotTaken(() => refetch()),
-      window.electronAPI.onResetView(() => refetch()),
+      window.electronAPI.onScreenshotTaken((_) => {
+        console.log("Screenshot taken event received");
+        // Add small delay to ensure screenshot is processed
+        setTimeout(refetchScreenshots, 500);
+      }),
+      window.electronAPI.onResetView(() => refetchScreenshots()),
 
       window.electronAPI.onSolutionError((error: string) => {
         showToast(
           "Processing Failed",
           "There was an error processing your screenshots.",
-          "error"
-        )
-        setView("queue") // Revert to queue if processing fails
-        console.error("Processing error:", error)
+          "error",
+        );
+        setView("queue"); // Revert to queue if processing fails
+        console.error("Processing error:", error);
       }),
       window.electronAPI.onProcessingNoScreenshots(() => {
         showToast(
           "No Screenshots",
           "There are no screenshots to process.",
-          "neutral"
-        )
+          "neutral",
+        );
       }),
-     
-    ]
+    ];
 
     return () => {
-      resizeObserver.disconnect()
-      cleanupFunctions.forEach((cleanup) => cleanup())
-    }
-  }, [isTooltipVisible, tooltipHeight])
+      resizeObserver.disconnect();
+      cleanupFunctions.forEach((cleanup) => cleanup());
+    };
+  }, [isTooltipVisible, tooltipHeight]);
 
   const handleTooltipVisibilityChange = (visible: boolean, height: number) => {
-    setIsTooltipVisible(visible)
-    setTooltipHeight(height)
-  }
+    setIsTooltipVisible(visible);
+    setTooltipHeight(height);
+  };
 
   return (
     <div ref={contentRef} className={`bg-transparent w-1/2`}>
       <div className="px-4 py-3">
         <div className="space-y-3 w-fit">
-          <ScreenshotQueue
-            isLoading={false}
-            screenshots={screenshots}
-            onDeleteScreenshot={handleDeleteScreenshot}
-          />
+          {/* Screenshot queue component is no longer displayed */}
 
           <QueueCommands
             onTooltipVisibilityChange={handleTooltipVisibilityChange}
-            screenshotCount={screenshots.length}
-
+            screenshotCount={screenshots ? screenshots.length : 0}
           />
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default Queue
+export default Queue;

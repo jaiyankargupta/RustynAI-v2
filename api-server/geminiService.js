@@ -7,11 +7,9 @@ class GeminiService {
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent";
 
     if (!this.apiKey) {
-      console.log(
-        "⚠️  Gemini API key not found. Please set GEMINI_API_KEY in your environment."
-      );
+      console.log("Gemini API key not found.");
     } else {
-      console.log("🤖 Gemini service initialized successfully");
+      console.log("Gemini service initialized...");
     }
   }
 
@@ -54,7 +52,7 @@ class GeminiService {
       console.log(`✅ ${operation} successful with Gemini`);
       return content;
     } catch (error) {
-      console.log(`❌ Gemini failed: ${error.message}`);
+      console.log(`Gemini failed: ${error.message}`);
       throw error;
     }
   }

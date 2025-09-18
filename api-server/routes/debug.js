@@ -1,128 +1,113 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 
-// Debug solution from additional screenshots
+// Generate solution from problem info
 router.post("/", async (req, res) => {
-  try {
-    const { imageDataList, problemInfo, language = "cpp" } = req.body;
-    const { ocrService, callGeminiService } = req.app.locals;
+  // Process image data or use provided text list
+  const { textList, imageDataList, problemInfo } = req.body;
+  const language = req.body.language || "cpp";
+  const { callGeminiService, processImages } = req.app.locals;
+  console.log("🔧 Pipeline: Debug Text → Gemini → Improved Solution");
 
-    // Validate input - require non-empty array and problem info
-    if (
-      !imageDataList ||
-      !Array.isArray(imageDataList) ||
-      imageDataList.length === 0
-    ) {
-      return res.status(400).json({
-        error: "imageDataList is required and must be a non-empty array",
-        details: "Please provide at least one debug screenshot in base64 format",
-      });
-    }
+  let combinedText = "";
 
-    if (!problemInfo || Object.keys(problemInfo).length === 0) {
-      return res.status(400).json({
-        error: "problemInfo is required",
-        details: "Please provide the original problem information",
-      });
-    }
-
+  // Check if we have image data that needs OCR processing
+  if (
+    imageDataList &&
+    Array.isArray(imageDataList) &&
+    imageDataList.length > 0
+  ) {
     console.log(
-      `🐛 Processing ${imageDataList.length} debug screenshots for language: ${language}`
+      `Received ${imageDataList.length} debug images for OCR processing`,
     );
-    console.log(
-      `🔧 Pipeline: Debug Screenshots → OCR → Text → Gemini → Improved Solution`
-    );
-
-    let debugInfo;
-    let extractedText = "";
-
     try {
-      // Step 1: Extract text using OCR from debug screenshots
-      console.log("📝 Step 1: Extracting debug text using OCR...");
-      extractedText = await ocrService.extractTextFromImages(imageDataList);
+      console.log(`Attempting OCR on ${imageDataList.length} debug images...`);
+      // Process images with OCR
+      const extractedTexts = await processImages(imageDataList);
 
-      // Validate OCR output
-      if (!extractedText || extractedText.trim().length === 0) {
-        return res.status(422).json({
-          error: "OCR failed to extract text from debug screenshots",
-          details:
-            "No text could be extracted from the provided debug screenshots. Please ensure the images contain readable text.",
-          suggestion:
-            "Try uploading higher quality debug screenshots with clear, readable text",
-        });
+      if (!extractedTexts || extractedTexts.length === 0) {
+        console.warn("No text extracted from debug images");
+
+        // Fall back to direct image data if OCR fails completely
+        console.log(
+          "Attempting to use image data directly with Gemini for debugging...",
+        );
+
+        // Use placeholder text to indicate this is image data
+        combinedText =
+          "DEBUG IMAGE DATA: Unable to extract text via OCR. Processing debug image directly.";
+      } else {
+        combinedText = extractedTexts.join("\n\n");
+        console.log(
+          `Debug OCR extraction successful: extracted ${extractedTexts.length} text segments`,
+        );
+        console.log(
+          "Sample of extracted debug text:",
+          combinedText.substring(0, 100) + "...",
+        );
       }
-
-      console.log(`✅ OCR extracted ${extractedText.length} characters from debug screenshots`);
-    } catch (ocrError) {
-      console.error("❌ OCR Error:", ocrError.message);
-      return res.status(422).json({
-        error: "OCR processing failed",
-        details:
-          "Could not process the provided debug screenshots. Please check image format and content.",
-        technical: ocrError.message,
-        suggestion:
-          "Ensure debug screenshots are in valid format (PNG, JPG) and contain readable text",
-      });
-    }
-
-    try {
-      // Step 2: Debug solution with Gemini AI
-      console.log(
-        "🤖 Step 2: Debugging solution with Gemini AI..."
-      );
-      debugInfo = await callGeminiService(
-        "debugSolution",
-        extractedText,
-        problemInfo,
-        language
-      );
-
-      // Validate AI output
-      if (!debugInfo) {
-        throw new Error("Gemini returned empty debug result");
-      }
-
-      console.log("✅ Debug solution generation completed successfully");
-    } catch (aiError) {
-      console.error("❌ Gemini AI Error:", aiError.message);
+    } catch (error) {
+      console.error("Debug OCR processing failed:", error);
       return res.status(500).json({
-        error: "Gemini AI debugging failed",
-        details:
-          "Could not debug the solution. Gemini AI service is experiencing issues.",
-        technical: aiError.message,
-        suggestion:
-          "Please try again later or check your Gemini API key configuration",
+        error: "OCR processing failed",
+        details: "Could not extract text from the provided debug images",
+        technical: error.message,
+        suggestion: "Please provide clearer debug screenshots",
       });
     }
-
-    // Transform the response to match frontend expectations
-    const response = {
-      new_code: debugInfo.improvedSolution || debugInfo.solution || "",
-      thoughts: Array.isArray(debugInfo.improvements) 
-        ? debugInfo.improvements 
-        : (debugInfo.improvements || debugInfo.thoughts || "").split('\n').filter(line => line.trim()),
-      time_complexity: debugInfo.timeComplexity || debugInfo.time_complexity || "",
-      space_complexity: debugInfo.spaceComplexity || debugInfo.space_complexity || "",
-      debug_notes: debugInfo.debugNotes || "",
-      language: debugInfo.language || language,
-      metadata: {
-        debugScreenshotsProcessed: imageDataList.length,
-        textLength: extractedText.length,
-        service: "Gemini (Real AI)",
-        mockDisabled: true,
-        timestamp: new Date().toISOString(),
-      },
-    };
-
-    res.json(response);
-  } catch (error) {
-    console.error("❌ Unexpected error in /api/debug:", error);
-    res.status(500).json({
-      error: "Unexpected server error",
-      details: "An unexpected error occurred while debugging your solution.",
-      technical: error.message,
+  }
+  // If we also have direct text input or no OCR results, use that
+  else if (textList && Array.isArray(textList) && textList.length > 0) {
+    combinedText = textList
+      .filter((t) => t && t.trim().length > 0)
+      .join("\n\n");
+  } else {
+    return res.status(400).json({
+      error: "No valid input provided",
+      details: "Please provide either textList or imageDataList for debugging",
     });
   }
+  if (!combinedText || combinedText.trim().length === 0) {
+    return res.status(400).json({
+      error: "No valid text provided",
+      details: "All texts in the array are empty or invalid",
+      suggestion: "Please provide clearer screenshots for OCR processing",
+    });
+  }
+
+  // Log the combined text length for debugging
+  console.log(`Processing debug text of length ${combinedText.length}`);
+  console.log(
+    `Debug input text starts with: ${combinedText.substring(0, 50)}...`,
+  );
+  let debugInfo;
+  try {
+    // Analyze text with Gemini AI
+    console.log("🤖 Analyzing debug text with Gemini AI...");
+    debugInfo = await callGeminiService(
+      "debugSolution",
+      combinedText,
+      problemInfo,
+      language,
+    );
+    if (!debugInfo) {
+      throw new Error("Gemini returned empty result");
+    }
+    console.log("✅ Real debug analysis completed successfully");
+  } catch (aiError) {
+    console.error("❌ Gemini AI Error:", aiError.message);
+    return res.status(500).json({
+      error: "Gemini AI analysis failed",
+      details:
+        "Could not analyze the extracted text. Gemini AI service is experiencing issues.",
+      technical: aiError.message,
+      suggestion:
+        "Please try again later or check your Gemini API key configuration",
+    });
+  }
+  res.json({
+    ...debugInfo,
+  });
 });
 
-module.exports = router; 
+module.exports = router;
